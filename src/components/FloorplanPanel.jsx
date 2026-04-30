@@ -1,13 +1,11 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useCallback } from 'react';
 
-// ── Reusable slider control ────────────────────────────────────────────────
-function Slider({ label, value, min, max, step = 1, onChange, unit = '', accent = 'sky' }) {
+function Slider({ label, value, min, max, step = 1, onChange }) {
   return (
-    <div className="flex flex-col gap-0.5 min-w-[100px]">
-      <span className="text-[11px] text-slate-400 whitespace-nowrap">
-        {label}:{' '}
-        <span className="text-slate-100 font-medium">{value}</span>
-        {unit}
+    <label className="flex flex-col gap-1 text-xs text-slate-300 min-w-[140px]">
+      <span className="flex justify-between">
+        <span>{label}</span>
+        <span className="text-sky-300">{value}</span>
       </span>
       <input
         type="range"
@@ -15,14 +13,13 @@ function Slider({ label, value, min, max, step = 1, onChange, unit = '', accent 
         max={max}
         step={step}
         value={value}
-        onChange={e => onChange(Number(e.target.value))}
-        className={`w-24 accent-${accent}-500 cursor-pointer h-1`}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="accent-sky-500"
       />
-    </div>
+    </label>
   );
 }
 
-// ── Main component ─────────────────────────────────────────────────────────
 export default function FloorplanPanel({
   originalImage,
   cleanedBitmap,
@@ -41,219 +38,185 @@ export default function FloorplanPanel({
   onMinLenChange,
   onMinComponentAreaChange,
 }) {
-  const fileInputRef    = useRef(null);
-  const imageCanvasRef  = useRef(null);
+  const fileInputRef = useRef(null);
+  const imageCanvasRef = useRef(null);
   const overlayCanvasRef = useRef(null);
-  const containerRef    = useRef(null);
-  const imgTransformRef = useRef(null); // { dx, dy, scale }
+  const containerRef = useRef(null);
+  const imgTransformRef = useRef({ dx: 0, dy: 0, scale: 1 });
 
-  // Draw an image or ImageBitmap source onto the canvas
+  const sourceImage = useMemo(() => {
+    if (showingCleaned && cleanedBitmap) return cleanedBitmap;
+    return originalImage;
+  }, [showingCleaned, cleanedBitmap, originalImage]);
+
   const drawToCanvas = useCallback((source) => {
-    const canvas   = imageCanvasRef.current;
-    const overlay  = overlayCanvasRef.current;
     const container = containerRef.current;
-    if (!canvas || !container || !source) return;
+    const imageCanvas = imageCanvasRef.current;
+    const overlayCanvas = overlayCanvasRef.current;
+    if (!container || !imageCanvas || !overlayCanvas) return;
 
-    const cw = container.clientWidth;
-    const ch = container.clientHeight;
-    const sw = source.width;
-    const sh = source.height;
-    if (!cw || !ch || !sw || !sh) return;
+    const cw = Math.max(1, container.clientWidth);
+    const ch = Math.max(1, container.clientHeight);
 
-    const scale = Math.min(cw / sw, ch / sh);
-    const dw = sw * scale;
-    const dh = sh * scale;
+    imageCanvas.width = cw;
+    imageCanvas.height = ch;
+    overlayCanvas.width = cw;
+    overlayCanvas.height = ch;
+
+    const ctx = imageCanvas.getContext('2d');
+    ctx.clearRect(0, 0, cw, ch);
+
+    if (!source) {
+      imgTransformRef.current = { dx: 0, dy: 0, scale: 1 };
+      return;
+    }
+
+    const scale = Math.min(cw / source.width, ch / source.height);
+    const dw = source.width * scale;
+    const dh = source.height * scale;
     const dx = (cw - dw) / 2;
     const dy = (ch - dh) / 2;
 
-    for (const c of [canvas, overlay]) {
-      c.width  = cw;
-      c.height = ch;
-    }
-
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, cw, ch);
-    ctx.imageSmoothingEnabled = !(source instanceof ImageBitmap);
-    ctx.drawImage(source, dx, dy, dw, dh);
-
     imgTransformRef.current = { dx, dy, scale };
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(source, dx, dy, dw, dh);
   }, []);
 
-  // Draw cyan wall lines + pink corner dots on the overlay canvas
   const drawOverlay = useCallback((wls, pts) => {
-    const canvas = overlayCanvasRef.current;
-    const t = imgTransformRef.current;
-    if (!canvas || !t) return;
+    const overlayCanvas = overlayCanvasRef.current;
+    if (!overlayCanvas) return;
+    const ctx = overlayCanvas.getContext('2d');
+    const { dx, dy, scale } = imgTransformRef.current;
 
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (!wls?.length) return;
+    ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    if (!wls.length) return;
 
-    const cx = (ix) => t.dx + ix * t.scale;
-    const cy = (iy) => t.dy + iy * t.scale;
-
-    ctx.strokeStyle = '#00e5ff';
-    ctx.lineWidth   = 1.5;
-    ctx.globalAlpha = 0.8;
+    ctx.strokeStyle = '#22d3ee';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
     for (const w of wls) {
-      ctx.beginPath();
-      ctx.moveTo(cx(w.x1), cy(w.y1));
-      ctx.lineTo(cx(w.x2), cy(w.y2));
-      ctx.stroke();
+      ctx.moveTo(dx + w.x1 * scale, dy + w.y1 * scale);
+      ctx.lineTo(dx + w.x2 * scale, dy + w.y2 * scale);
     }
+    ctx.stroke();
 
-    ctx.fillStyle   = '#ff4081';
-    ctx.globalAlpha = 0.9;
-    for (const p of pts) {
-      ctx.beginPath();
-      ctx.arc(cx(p.x), cy(p.y), 3, 0, Math.PI * 2);
-      ctx.fill();
+    if (pts.length) {
+      ctx.fillStyle = '#f472b6';
+      for (const p of pts) {
+        const x = dx + p.x * scale;
+        const y = dy + p.y * scale;
+        ctx.beginPath();
+        ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
-    ctx.globalAlpha = 1;
   }, []);
 
-  // Re-draw whenever image/view/walls change
   useEffect(() => {
-    const source = showingCleaned && cleanedBitmap ? cleanedBitmap : originalImage;
-    drawToCanvas(source);
+    drawToCanvas(sourceImage);
     drawOverlay(walls, points);
-  }, [originalImage, cleanedBitmap, showingCleaned, walls, points, drawToCanvas, drawOverlay]);
+  }, [sourceImage, walls, points, drawToCanvas, drawOverlay]);
 
-  // ResizeObserver keeps the canvas sharp when the panel resizes
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+
     const ro = new ResizeObserver(() => {
-      const source = showingCleaned && cleanedBitmap ? cleanedBitmap : originalImage;
-      drawToCanvas(source);
+      drawToCanvas(sourceImage);
       drawOverlay(walls, points);
     });
+
     ro.observe(container);
     return () => ro.disconnect();
-  }, [originalImage, cleanedBitmap, showingCleaned, walls, points, drawToCanvas, drawOverlay]);
+  }, [sourceImage, walls, points, drawToCanvas, drawOverlay]);
 
-  // File picker handler
-  const handleFileChange = (e) => {
+  const triggerFileSelect = () => fileInputRef.current?.click();
+
+  const onChooseFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const url = URL.createObjectURL(file);
+
     const img = new Image();
-    img.onload = () => { onImageLoad(img); URL.revokeObjectURL(url); };
-    img.src = url;
-    e.target.value = ''; // allow re-picking the same file
+    img.onload = () => onImageLoad(img);
+    img.onerror = () => alert('Failed to load image');
+    img.src = URL.createObjectURL(file);
   };
 
-  const hasImage   = !!originalImage;
-  const hasResults = walls.length > 0;
-
   return (
-    <div className="w-1/2 flex flex-col border-r border-slate-800">
+    <div className="w-1/2 border-r border-slate-800 flex flex-col min-w-[460px]">
+      <div className="bg-slate-900 px-4 py-3 border-b border-slate-800">
+        <div className="flex flex-wrap gap-2 items-center mb-3">
+          <button
+            onClick={triggerFileSelect}
+            className="px-3 py-1.5 text-xs rounded-md bg-sky-600 hover:bg-sky-500 text-white"
+          >
+            Load Image
+          </button>
+          <button
+            onClick={onDetect}
+            disabled={!originalImage || isDetecting}
+            className="px-3 py-1.5 text-xs rounded-md bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50"
+          >
+            {isDetecting ? 'Detecting...' : 'Detect Walls'}
+          </button>
+          <button
+            onClick={onToggleCleaned}
+            disabled={!cleanedBitmap}
+            className="px-3 py-1.5 text-xs rounded-md bg-slate-700 hover:bg-slate-600 text-slate-100 disabled:opacity-50"
+          >
+            {showingCleaned ? 'Show Original' : 'Show Cleaned'}
+          </button>
+          <button
+            onClick={onExport}
+            disabled={!walls.length}
+            className="px-3 py-1.5 text-xs rounded-md bg-fuchsia-600 hover:bg-fuchsia-500 text-white disabled:opacity-50"
+          >
+            Export JSON
+          </button>
 
-      {/* ── Toolbar ── */}
-      <div className="bg-slate-900 px-4 py-3 border-b border-slate-800 flex-shrink-0">
-        <h2 className="text-sky-400 text-sm font-semibold tracking-wide mb-3">
-          🗺 Floorplan Wall Detector
-        </h2>
-
-        <div className="flex flex-wrap gap-3 items-end">
-          {/* Hidden file input */}
           <input
             ref={fileInputRef}
             type="file"
             accept="image/*"
+            onChange={onChooseFile}
             className="hidden"
-            onChange={handleFileChange}
           />
+        </div>
 
-          {/* Load image button */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="px-3 py-1.5 text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200
-                       rounded-md border border-slate-600 transition-colors duration-150"
-          >
-            📂 Load Image
-          </button>
-
-          {/* Detection sliders */}
+        <div className="flex flex-wrap gap-3">
           <Slider
             label="Wall Darkness"
             value={darkThreshold}
-            min={10} max={120}
+            min={10}
+            max={120}
             onChange={onDarkThresholdChange}
-            accent="sky"
           />
           <Slider
             label="Min Wall px"
             value={minLen}
-            min={5} max={500}
+            min={5}
+            max={500}
             onChange={onMinLenChange}
-            accent="sky"
           />
           <Slider
             label="Remove Furn. <"
             value={minComponentArea}
-            min={50} max={5000} step={50}
-            unit=" px"
+            min={50}
+            max={5000}
             onChange={onMinComponentAreaChange}
-            accent="sky"
           />
-
-          {/* Action buttons */}
-          <button
-            onClick={onDetect}
-            disabled={!hasImage || isDetecting}
-            className="px-3 py-1.5 text-xs font-semibold bg-sky-600 hover:bg-sky-500
-                       disabled:opacity-40 disabled:cursor-not-allowed
-                       text-white rounded-md transition-colors duration-150"
-          >
-            {isDetecting ? '⏳ Detecting…' : '🔍 Detect Walls'}
-          </button>
-
-          <button
-            onClick={onToggleCleaned}
-            disabled={!cleanedBitmap}
-            className="px-3 py-1.5 text-xs font-medium bg-slate-700 hover:bg-slate-600
-                       disabled:opacity-40 disabled:cursor-not-allowed
-                       text-slate-200 rounded-md border border-slate-600 transition-colors duration-150"
-          >
-            {showingCleaned ? '🖼 Show Original' : '👁 Show Cleaned'}
-          </button>
-
-          <button
-            onClick={onExport}
-            disabled={!hasResults}
-            className="px-3 py-1.5 text-xs font-medium bg-slate-700 hover:bg-slate-600
-                       disabled:opacity-40 disabled:cursor-not-allowed
-                       text-slate-200 rounded-md border border-slate-600 transition-colors duration-150"
-          >
-            📤 Export JSON
-          </button>
         </div>
       </div>
 
-      {/* ── Canvas area ── */}
-      <div
-        ref={containerRef}
-        className="relative flex-1 bg-slate-950 overflow-hidden flex items-center justify-center"
-      >
-        <canvas ref={imageCanvasRef}  className="absolute top-0 left-0" />
+      <div ref={containerRef} className="relative flex-1 bg-slate-950 overflow-hidden">
+        <canvas ref={imageCanvasRef} className="absolute top-0 left-0" />
         <canvas ref={overlayCanvasRef} className="absolute top-0 left-0 pointer-events-none" />
-        {!hasImage && (
-          <p className="text-slate-600 text-sm select-none pointer-events-none">
-            Load a floorplan image to begin
-          </p>
-        )}
       </div>
 
-      {/* ── Stats bar ── */}
-      <div className="bg-slate-900 px-4 py-1.5 border-t border-slate-800 flex gap-5 text-[11px] text-slate-500 flex-shrink-0">
-        <span>Walls: <span className="text-slate-300">{walls.length}</span></span>
-        <span>Points: <span className="text-slate-300">{points.length}</span></span>
-        {originalImage && (
-          <span>
-            Size: <span className="text-slate-300">{originalImage.width} × {originalImage.height}</span>
-          </span>
-        )}
+      <div className="px-4 py-2 bg-slate-900 border-t border-slate-800 text-xs text-slate-400 flex justify-between">
+        <span>Walls: {walls.length}</span>
+        <span>Points: {points.length}</span>
+        <span>{sourceImage ? `${sourceImage.width} x ${sourceImage.height}` : 'No image loaded'}</span>
       </div>
     </div>
   );
