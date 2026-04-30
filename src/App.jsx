@@ -146,7 +146,7 @@ export default function App() {
   }, [floors]);
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-200 overflow-hidden select-none">
+    <div className="flex h-screen bg-zinc-950 text-stone-200 overflow-hidden select-none">
       {/* ── Left sidebar: floor browser ── */}
       <FloorSidebar
         floors={floors}
@@ -162,29 +162,29 @@ export default function App() {
       {/* ── Main area ── */}
       <div className="flex flex-col flex-1 min-w-0">
         {/* Tab bar */}
-        <div className="flex items-center gap-1 px-3 py-2 bg-slate-900 border-b border-slate-800 flex-shrink-0">
-          {[['2d', '🗺 2D Floorplan'], ['3d', '🏢 3D Building']].map(([key, label]) => (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-zinc-900 border-b border-zinc-800 flex-shrink-0">
+          {[['2d', '2D Floorplan'], ['3d', '3D Building']].map(([key, label]) => (
             <button
               key={key}
               onClick={() => setActiveTab(key)}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              className={`px-5 py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all duration-200 ${
                 activeTab === key
-                  ? 'bg-sky-600 text-white'
-                  : 'bg-slate-800 text-slate-400 hover:text-slate-100 hover:bg-slate-700'
+                  ? 'bg-amber-500 text-zinc-950 shadow-md shadow-amber-900/40'
+                  : 'text-stone-400 hover:text-stone-100 hover:bg-zinc-800'
               }`}
             >
               {label}
             </button>
           ))}
           {activeFloor && activeTab === '2d' && (
-            <span className="ml-auto text-xs text-slate-500 truncate max-w-[200px]">
+            <span className="ml-auto text-xs text-stone-500 truncate max-w-[200px] italic">
               {activeFloor.name}
             </span>
           )}
         </div>
 
         {/* Content */}
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0 overflow-hidden">
           {activeTab === '2d' ? (
             activeFloor ? (
               <>
@@ -203,8 +203,9 @@ export default function App() {
                 />
               </>
             ) : (
-              <div className="flex-1 flex items-center justify-center text-slate-600 text-sm">
-                Upload a floor plan from the left panel to get started.
+              <div className="flex-1 flex flex-col items-center justify-center gap-3 text-stone-600">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M3 10l9-7 9 7v11a1 1 0 01-1 1H4a1 1 0 01-1-1V10z" /></svg>
+                <p className="text-sm">Upload a floor plan from the left panel to get started.</p>
               </div>
             )
           ) : (

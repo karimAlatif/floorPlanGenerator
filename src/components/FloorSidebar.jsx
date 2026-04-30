@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 
-// Drag-to-sort floor card
-function FloorCard({ floor, isActive, index, total, onSelect, onRename, onDelete, onDuplicate, onDragStart, onDragOver, onDrop }) {
+// ── Floor card ────────────────────────────────────────────────────────────────
+function FloorCard({ floor, isActive, index, onSelect, onRename, onDelete, onDuplicate, onDragStart, onDragOver, onDrop }) {
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(floor.name);
   const inputRef = useRef(null);
@@ -27,22 +27,22 @@ function FloorCard({ floor, isActive, index, total, onSelect, onRename, onDelete
       onDragOver={(e) => { e.preventDefault(); onDragOver(index); }}
       onDrop={(e) => { e.preventDefault(); onDrop(index); }}
       onClick={() => onSelect(floor.id)}
-      className={`group relative flex flex-col gap-1 p-2 rounded-lg cursor-pointer border transition-all duration-150
+      className={`group relative flex flex-col gap-2 p-2.5 rounded-xl cursor-pointer border transition-all duration-200
         ${isActive
-          ? 'bg-sky-900/60 border-sky-500/70 shadow-lg shadow-sky-900/30'
-          : 'bg-slate-800/60 border-slate-700/50 hover:bg-slate-800 hover:border-slate-600'}`}
+          ? 'bg-amber-500/10 border-amber-500/50 shadow-lg shadow-amber-950/30 ring-1 ring-amber-500/20'
+          : 'bg-zinc-800/50 border-zinc-700/40 hover:bg-zinc-800 hover:border-zinc-600/60'}`}
     >
       {/* Thumbnail */}
-      <div className="w-full aspect-video bg-slate-900 rounded overflow-hidden flex items-center justify-center">
+      <div className="w-full aspect-video bg-zinc-950 rounded-lg overflow-hidden flex items-center justify-center border border-zinc-700/30">
         {floor.image ? (
           <CanvasThumbnail image={floor.image} walls={floor.walls} />
         ) : (
-          <span className="text-slate-600 text-xs">No image</span>
+          <span className="text-zinc-600 text-[10px]">No image</span>
         )}
       </div>
 
-      {/* Name row */}
-      <div className="flex items-center gap-1 min-w-0" onClick={e => e.stopPropagation()}>
+      {/* Name */}
+      <div className="flex items-center min-w-0 px-0.5" onClick={e => e.stopPropagation()}>
         {editing ? (
           <input
             ref={inputRef}
@@ -50,11 +50,11 @@ function FloorCard({ floor, isActive, index, total, onSelect, onRename, onDelete
             onChange={e => setDraftName(e.target.value)}
             onBlur={commitRename}
             onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setEditing(false); }}
-            className="flex-1 min-w-0 text-xs bg-slate-700 border border-sky-500 rounded px-1.5 py-0.5 text-slate-100 outline-none"
+            className="flex-1 min-w-0 text-xs bg-zinc-700 border border-amber-500/70 rounded-md px-2 py-0.5 text-stone-100 outline-none"
           />
         ) : (
           <span
-            className="flex-1 min-w-0 text-xs text-slate-200 truncate"
+            className={`flex-1 min-w-0 text-[11px] font-medium truncate transition-colors ${isActive ? 'text-amber-300' : 'text-stone-300'}`}
             onDoubleClick={startEdit}
             title={floor.name + ' (double-click to rename)'}
           >
@@ -63,61 +63,58 @@ function FloorCard({ floor, isActive, index, total, onSelect, onRename, onDelete
         )}
       </div>
 
-      {/* Stats */}
-      <div className="flex gap-2 text-[10px] text-slate-500">
-        <span>{floor.walls.length} walls</span>
-        {floor.isDetecting && <span className="text-sky-400 animate-pulse">detecting…</span>}
+      {/* Meta row */}
+      <div className="flex items-center justify-between px-0.5">
+        <span className="text-[10px] text-zinc-500">
+          {floor.walls.length ? `${floor.walls.length} walls` : 'undetected'}
+        </span>
+        {floor.isDetecting && (
+          <span className="text-[10px] text-amber-400 animate-pulse">scanning…</span>
+        )}
       </div>
 
-      {/* Action buttons — show on hover */}
-      <div className="absolute top-1.5 right-1.5 hidden group-hover:flex gap-1">
-        <button
-          onClick={e => { e.stopPropagation(); startEdit(e); }}
-          title="Rename"
-          className="p-1 rounded bg-slate-700/90 hover:bg-slate-600 text-slate-300 text-[11px] leading-none"
-        >✏️</button>
-        <button
-          onClick={e => { e.stopPropagation(); onDuplicate(floor.id); }}
-          title="Duplicate"
-          className="p-1 rounded bg-slate-700/90 hover:bg-slate-600 text-slate-300 text-[11px] leading-none"
-        >⧉</button>
-        <button
-          onClick={e => { e.stopPropagation(); onDelete(floor.id); }}
-          title="Delete"
-          className="p-1 rounded bg-slate-700/90 hover:bg-red-600 text-slate-300 text-[11px] leading-none"
-        >✕</button>
+      {/* Hover action bar */}
+      <div className="absolute top-2 right-2 hidden group-hover:flex gap-1">
+        {[
+          { icon: '✏', title: 'Rename',    action: (e) => startEdit(e),                     hov: 'hover:bg-zinc-600' },
+          { icon: '⧉', title: 'Duplicate', action: (e) => { e.stopPropagation(); onDuplicate(floor.id); }, hov: 'hover:bg-zinc-600' },
+          { icon: '✕', title: 'Delete',    action: (e) => { e.stopPropagation(); onDelete(floor.id); },    hov: 'hover:bg-red-600/80' },
+        ].map(({ icon, title, action, hov }) => (
+          <button
+            key={title}
+            onClick={action}
+            title={title}
+            className={`w-5 h-5 flex items-center justify-center rounded-md bg-zinc-700/90 ${hov} text-stone-300 text-[10px] transition-colors duration-150`}
+          >{icon}</button>
+        ))}
       </div>
 
-      {/* Drag handle badge */}
-      <div className="absolute bottom-1.5 right-1.5 text-slate-600 text-[10px] select-none cursor-grab">⠿</div>
+      {/* Drag grip */}
+      <div className="absolute bottom-2 right-2 text-zinc-600 text-[10px] select-none cursor-grab opacity-0 group-hover:opacity-100 transition-opacity">⠿</div>
     </div>
   );
 }
 
-// Small canvas thumbnail with wall overlay
+// ── Thumbnail canvas ──────────────────────────────────────────────────────────
 function CanvasThumbnail({ image, walls }) {
-  const canvasRef = useRef(null);
-
-  // Draw once image changes
   const draw = (canvas) => {
     if (!canvas || !image) return;
-    const w = canvas.width;
-    const h = canvas.height;
+    const { width: w, height: h } = canvas;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, w, h);
 
-    const scale = Math.min(w / image.width, h / image.height);
-    const dw = image.width * scale, dh = image.height * scale;
+    const sc = Math.min(w / image.width, h / image.height);
+    const dw = image.width * sc, dh = image.height * sc;
     const dx = (w - dw) / 2, dy = (h - dh) / 2;
     ctx.drawImage(image, dx, dy, dw, dh);
 
     if (walls.length) {
-      ctx.strokeStyle = '#22d3ee';
-      ctx.lineWidth = 0.8;
+      ctx.strokeStyle = '#f59e0b88';
+      ctx.lineWidth = 1;
       ctx.beginPath();
       for (const wall of walls) {
-        ctx.moveTo(dx + wall.x1 * scale, dy + wall.y1 * scale);
-        ctx.lineTo(dx + wall.x2 * scale, dy + wall.y2 * scale);
+        ctx.moveTo(dx + wall.x1 * sc, dy + wall.y1 * sc);
+        ctx.lineTo(dx + wall.x2 * sc, dy + wall.y2 * sc);
       }
       ctx.stroke();
     }
@@ -125,96 +122,91 @@ function CanvasThumbnail({ image, walls }) {
 
   return (
     <canvas
-      ref={el => { canvasRef.current = el; draw(el); }}
+      ref={el => draw(el)}
       width={160}
       height={90}
-      className="w-full h-full object-contain"
+      className="w-full h-full"
     />
   );
 }
 
-// Drop zone for file upload
+// ── Upload zone ───────────────────────────────────────────────────────────────
 function UploadZone({ onUpload }) {
   const inputRef = useRef(null);
   const [dragging, setDragging] = useState(false);
-
-  const handleFiles = (files) => onUpload(files);
 
   return (
     <div
       onClick={() => inputRef.current?.click()}
       onDragOver={e => { e.preventDefault(); setDragging(true); }}
       onDragLeave={() => setDragging(false)}
-      onDrop={e => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files); }}
-      className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-lg border-2 border-dashed cursor-pointer transition-colors duration-150
-        ${dragging ? 'border-sky-400 bg-sky-900/20' : 'border-slate-700 bg-slate-800/30 hover:border-slate-500 hover:bg-slate-800/50'}`}
+      onDrop={e => { e.preventDefault(); setDragging(false); onUpload(e.dataTransfer.files); }}
+      className={`flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-xl border-2 border-dashed cursor-pointer transition-all duration-200
+        ${dragging
+          ? 'border-amber-400 bg-amber-500/10 scale-[1.02]'
+          : 'border-zinc-700 bg-zinc-800/20 hover:border-zinc-500 hover:bg-zinc-800/40'}`}
     >
-      <span className="text-2xl">📂</span>
-      <span className="text-xs text-slate-400 text-center leading-tight">
-        Click or drop<br/>floorplan images
+      <div className="w-8 h-8 rounded-lg bg-zinc-700/60 flex items-center justify-center text-stone-400 text-sm">+</div>
+      <span className="text-[11px] text-zinc-500 text-center leading-snug">
+        Add floor plans
       </span>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        multiple
-        onChange={e => handleFiles(e.target.files)}
-        className="hidden"
-      />
+      <input ref={inputRef} type="file" accept="image/*" multiple onChange={e => onUpload(e.target.files)} className="hidden" />
     </div>
   );
 }
 
+// ── Sidebar ───────────────────────────────────────────────────────────────────
 export default function FloorSidebar({ floors, activeId, onSelect, onUpload, onRename, onDelete, onDuplicate, onReorder }) {
   const dragFromRef = useRef(null);
 
-  const handleDragStart = (idx) => { dragFromRef.current = idx; };
-  const handleDragOver  = (idx) => { /* visual feedback could go here */ };
-  const handleDrop      = (toIdx) => {
-    const fromIdx = dragFromRef.current;
-    if (fromIdx != null && fromIdx !== toIdx) {
-      onReorder(fromIdx, toIdx);
-    }
-    dragFromRef.current = null;
-  };
-
   return (
-    <aside className="w-52 flex-shrink-0 bg-slate-900 border-r border-slate-800 flex flex-col">
+    <aside className="w-56 flex-shrink-0 bg-zinc-900 border-r border-zinc-800/80 flex flex-col h-full">
       {/* Header */}
-      <div className="px-3 py-3 border-b border-slate-800">
-        <h1 className="text-xs font-semibold text-slate-300 uppercase tracking-widest mb-2">Floors</h1>
+      <div className="px-4 pt-4 pb-3 border-b border-zinc-800/80">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-1.5 h-4 rounded-full bg-amber-500" />
+          <h1 className="text-xs font-semibold text-stone-300 tracking-widest uppercase">Floors</h1>
+        </div>
         <UploadZone onUpload={onUpload} />
       </div>
 
-      {/* Floor list */}
-      <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
-        {floors.length === 0 && (
-          <p className="text-center text-xs text-slate-600 pt-6">No floors yet</p>
+      {/* List */}
+      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5 scrollbar-thin">
+        {floors.length === 0 ? (
+          <p className="text-center text-[11px] text-zinc-600 pt-8 leading-relaxed">
+            No floors yet.<br />Add a floor plan above.
+          </p>
+        ) : (
+          floors.map((floor, idx) => (
+            <FloorCard
+              key={floor.id}
+              floor={floor}
+              index={idx}
+              isActive={floor.id === activeId}
+              onSelect={onSelect}
+              onRename={onRename}
+              onDelete={onDelete}
+              onDuplicate={onDuplicate}
+              onDragStart={(i) => { dragFromRef.current = i; }}
+              onDragOver={() => {}}
+              onDrop={(toIdx) => {
+                const from = dragFromRef.current;
+                if (from != null && from !== toIdx) onReorder(from, toIdx);
+                dragFromRef.current = null;
+              }}
+            />
+          ))
         )}
-        {floors.map((floor, idx) => (
-          <FloorCard
-            key={floor.id}
-            floor={floor}
-            index={idx}
-            total={floors.length}
-            isActive={floor.id === activeId}
-            onSelect={onSelect}
-            onRename={onRename}
-            onDelete={onDelete}
-            onDuplicate={onDuplicate}
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-          />
-        ))}
       </div>
 
       {/* Footer */}
       {floors.length > 0 && (
-        <div className="px-3 py-2 border-t border-slate-800 text-[10px] text-slate-600">
-          {floors.length} floor{floors.length !== 1 ? 's' : ''} · drag to reorder
+        <div className="px-4 py-2.5 border-t border-zinc-800/80 text-[10px] text-zinc-600 flex justify-between">
+          <span>{floors.length} floor{floors.length !== 1 ? 's' : ''}</span>
+          <span>drag to reorder</span>
         </div>
       )}
     </aside>
   );
 }
+
