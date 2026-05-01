@@ -46,11 +46,9 @@ export default function App() {
       img.onload = () => {
         URL.revokeObjectURL(url);
         const floor = makeFloor(file.name.replace(/\.[^.]+$/, ''), img);
-        setFloors(prev => {
-          const next = [...prev, floor];
-          setActiveId(id => id ?? floor.id);
-          return next;
-        });
+        setFloors(prev => [...prev, floor]);
+        setActiveId(floor.id);
+        setActiveTab('2d');
       };
       img.src = url;
     });
@@ -209,7 +207,7 @@ export default function App() {
               </div>
             )
           ) : (
-            <BuildingView floors={floors} />
+            <BuildingView floors={floors} activeId={activeId} />
           )}
         </div>
       </div>

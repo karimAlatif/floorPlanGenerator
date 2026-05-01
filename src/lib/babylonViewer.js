@@ -1,19 +1,32 @@
-/**
+﻿/**
  * src/lib/babylonViewer.js
  *
- * BabylonJS scene manager — multi-floor building, elegant lighting.
- * NOTE: window resize is NOT handled here — the React component manages it.
+ * BabylonJS scene manager - multi-floor building, PBR lighting, highlight, explode.
+ * NOTE: window resize is NOT handled here - the React component manages it.
  */
 
 import * as BABYLON from '@babylonjs/core';
 
-let engine       = null;
-let scene        = null;
-let camera       = null;
-let buildingRoot = null;
+let engine         = null;
+let scene          = null;
+let camera         = null;
+let buildingRoot   = null;
+let highlightLayer = null;
 
-// ── Init ─────────────────────────────────────────────────────────────────────
+// Per-floor data - rebuilt on every buildBuilding call
+let floorNodeData      = []; // [{ floorId, node, baseY, slotHeight }]
+const floorMeshMap     = new Map(); // floorId -> Mesh[]
+let _highlightedMeshes = [];
+let _isExploded        = false;
+
+// ---------- Init -------------------------------------------------------
 export function initBabylon(canvas) {
+  // Reset module state for hot-reload / remount
+  floorNodeData      = [];
+  floorMeshMap.clear();
+  _highlightedMeshes = [];
+  _isExploded        = false;
+
   engine = new BABYLON.Engine(canvas, true, {
     preserveDrawingBuffer: true,
     stencil: true,
@@ -21,11 +34,10 @@ export function initBabylon(canvas) {
   });
 
   scene = new BABYLON.Scene(engine);
-  // Warm off-white sky gradient – not pitch black
-  scene.clearColor = new BABYLON.Color4(0.07, 0.07, 0.1, 1);
-  scene.ambientColor = new BABYLON.Color3(0.25, 0.22, 0.18);
+  scene.clearColor   = new BABYLON.Color4(0.04, 0.04, 0.08, 1);
+  scene.ambientColor = new BABYLON.Color3(0.10, 0.09, 0.07);
 
-  // ── Camera ──
+  // Camera
   camera = new BABYLON.ArcRotateCamera('cam', -Math.PI / 2, Math.PI / 3.2, 80, BABYLON.Vector3.Zero(), scene);
   camera.lowerRadiusLimit   = 5;
   camera.upperRadiusLimit   = 600;
@@ -34,40 +46,53 @@ export function initBabylon(canvas) {
   camera.panningSensibility = 100;
   camera.attachControl(canvas, true);
 
-  // ── Lights ──
-  // 1. Warm sky dome (bright)
+  // 1. Sky dome - warm overcast sky
   const hemi = new BABYLON.HemisphericLight('hemi', new BABYLON.Vector3(0, 1, 0), scene);
-  hemi.intensity    = 1.1;
-  hemi.diffuse      = new BABYLON.Color3(0.98, 0.95, 0.88);   // warm white
-  hemi.groundColor  = new BABYLON.Color3(0.28, 0.24, 0.20);   // warm bounce light
-  hemi.specular     = new BABYLON.Color3(0.1, 0.1, 0.08);
+  hemi.intensity   = 0.50;
+  hemi.diffuse     = new BABYLON.Color3(0.86, 0.84, 0.78);
+  hemi.groundColor = new BABYLON.Color3(0.18, 0.14, 0.10);
+  hemi.specular    = new BABYLON.Color3(0, 0, 0);
 
-  // 2. Key directional — warm sun angle
-  const key = new BABYLON.DirectionalLight('key', new BABYLON.Vector3(-0.6, -1, -0.5), scene);
-  key.intensity = 1.4;
-  key.diffuse   = new BABYLON.Color3(1.0, 0.92, 0.78);        // golden
-  key.specular  = new BABYLON.Color3(0.5, 0.4, 0.2);
-  key.position  = new BABYLON.Vector3(40, 60, 30);
+  // 2. Key sun - golden hour angle, strong & directional
+  const key = new BABYLON.DirectionalLight('key', new BABYLON.Vector3(-0.50, -1, -0.40).normalize(), scene);
+  key.intensity = 3.2;
+  key.diffuse   = new BABYLON.Color3(1.00, 0.92, 0.76);
+  key.specular  = new BABYLON.Color3(0.40, 0.30, 0.14);
+  key.position  = new BABYLON.Vector3(60, 90, 40);
 
-  // 3. Fill light from opposite side – cool blue
-  const fill = new BABYLON.DirectionalLight('fill', new BABYLON.Vector3(0.5, -0.4, 0.6), scene);
-  fill.intensity = 0.4;
-  fill.diffuse   = new BABYLON.Color3(0.6, 0.75, 1.0);
+  // 3. Cool fill - sky bounce from opposite side
+  const fill = new BABYLON.DirectionalLight('fill', new BABYLON.Vector3(0.40, -0.20, 0.55).normalize(), scene);
+  fill.intensity = 0.55;
+  fill.diffuse   = new BABYLON.Color3(0.50, 0.64, 1.00);
   fill.specular  = new BABYLON.Color3(0, 0, 0);
 
-  // ── Shadow generator (key light) ──
+  // 4. Subtle back rim - separates geometry from background
+  const rim = new BABYLON.DirectionalLight('rim', new BABYLON.Vector3(0.10, -0.30, 1.0).normalize(), scene);
+  rim.intensity = 0.20;
+  rim.diffuse   = new BABYLON.Color3(0.70, 0.78, 1.00);
+  rim.specular  = new BABYLON.Color3(0, 0, 0);
+
+  // Shadow generator (key light only for performance)
   const shadowGen = new BABYLON.ShadowGenerator(2048, key);
   shadowGen.useBlurExponentialShadowMap = true;
-  shadowGen.blurKernel                  = 32;
-  shadowGen.darkness                    = 0.35;
+  shadowGen.blurKernel                  = 20;
+  shadowGen.darkness                    = 0.52;
+  shadowGen.transparencyShadow          = true;
+  shadowGen.forceBackFacesOnly          = true;
 
-  // ── Ground plane ──
-  _addGround(scene);
+  // Highlight layer for active-floor glow
+  try {
+    highlightLayer = new BABYLON.HighlightLayer('hl', scene, {
+      mainTextureRatio:    0.5,
+      blurTextureSizeRatio: 0.5,
+    });
+    highlightLayer.outerGlow          = true;
+    highlightLayer.innerGlow          = false;
+    highlightLayer.blurHorizontalSize = 1.0;
+    highlightLayer.blurVerticalSize   = 1.0;
+  } catch (_) { highlightLayer = null; }
 
-  // ── Thin grid ──
   _addGrid(scene);
-
-  // ── Post-processing: slight tone-mapping ──
   _addPostProcess(camera, scene);
 
   engine.runRenderLoop(() => scene.render());
@@ -75,50 +100,95 @@ export function initBabylon(canvas) {
   return { engine, scene, shadowGen };
 }
 
-function _addGround(scene) {
-  const ground = BABYLON.MeshBuilder.CreateGround('infiniteGround', { width: 600, height: 600, subdivisions: 1 }, scene);
-  const mat    = new BABYLON.StandardMaterial('groundMat', scene);
-  mat.diffuseColor  = new BABYLON.Color3(0.13, 0.12, 0.11);
-  mat.specularColor = new BABYLON.Color3(0, 0, 0);
-  ground.material       = mat;
-  ground.receiveShadows = true;
-  ground.position.y     = -0.01;
-}
-
 function _addGrid(scene) {
   const lines = [];
   const size = 200, step = 5;
   for (let i = -size; i <= size; i += step) {
-    const alpha = i % 25 === 0 ? 0.25 : 0.1;
-    lines.push([
-      new BABYLON.Vector3(i, 0.001, -size),
-      new BABYLON.Vector3(i, 0.001, size),
-    ]);
-    lines.push([
-      new BABYLON.Vector3(-size, 0.001, i),
-      new BABYLON.Vector3(size, 0.001, i),
-    ]);
+    lines.push([ new BABYLON.Vector3(i, 0.001, -size), new BABYLON.Vector3(i, 0.001,  size) ]);
+    lines.push([ new BABYLON.Vector3(-size, 0.001, i), new BABYLON.Vector3( size, 0.001, i) ]);
   }
   const grid = BABYLON.MeshBuilder.CreateLineSystem('grid', { lines }, scene);
-  grid.color = new BABYLON.Color3(0.22, 0.20, 0.18);
+  grid.color = new BABYLON.Color3(0.20, 0.18, 0.16);
 }
 
 function _addPostProcess(camera, scene) {
   try {
     const pipeline = new BABYLON.DefaultRenderingPipeline('pipeline', true, scene, [camera]);
-    pipeline.imageProcessingEnabled = true;
-    pipeline.imageProcessing.toneMappingEnabled = true;
-    pipeline.imageProcessing.toneMappingType    = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
-    pipeline.imageProcessing.exposure           = 1.15;
-    pipeline.imageProcessing.contrast           = 1.1;
-    pipeline.fxaaEnabled         = true;
-    pipeline.bloomEnabled        = false;
-  } catch (_) {
-    // DefaultRenderingPipeline may not be available in all configs – skip gracefully
-  }
+
+    pipeline.imageProcessingEnabled                  = true;
+    pipeline.imageProcessing.toneMappingEnabled      = true;
+    pipeline.imageProcessing.toneMappingType         = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
+    pipeline.imageProcessing.exposure                = 1.25;
+    pipeline.imageProcessing.contrast                = 1.18;
+    pipeline.imageProcessing.vignetteEnabled         = true;
+    pipeline.imageProcessing.vignetteWeight          = 2.0;
+    pipeline.imageProcessing.vignetteCameraFov       = 0.5;
+    pipeline.imageProcessing.colorCurvesEnabled      = true;
+
+    pipeline.fxaaEnabled     = true;
+
+    pipeline.bloomEnabled    = true;
+    pipeline.bloomThreshold  = 0.80;
+    pipeline.bloomWeight     = 0.20;
+    pipeline.bloomKernel     = 48;
+    pipeline.bloomScale      = 0.5;
+
+    pipeline.sharpenEnabled         = true;
+    pipeline.sharpen.edgeAmount     = 0.22;
+    pipeline.sharpen.colorAmount    = 1.0;
+  } catch (_) { /* unavailable in some configs */ }
 }
 
-// ── Build entire building ─────────────────────────────────────────────────────
+// ---------- Highlight active floor ----------------------------------------
+export function highlightFloor(floorId) {
+  if (!highlightLayer) return;
+
+  _highlightedMeshes.forEach(m => {
+    try { highlightLayer.removeMesh(m); } catch (_) {}
+  });
+  _highlightedMeshes = [];
+
+  if (floorId == null) return;
+  const meshes = floorMeshMap.get(floorId);
+  if (!meshes) return;
+
+  const glowColor = new BABYLON.Color3(1.0, 0.72, 0.08); // warm amber
+  meshes.forEach(m => {
+    try {
+      highlightLayer.addMesh(m, glowColor);
+      _highlightedMeshes.push(m);
+    } catch (_) {}
+  });
+}
+
+// ---------- Explode / collapse floors -------------------------------------
+export function setExplodeGap(exploded) {
+  if (!scene || !floorNodeData.length) return;
+  _isExploded = exploded;
+
+  const EXTRA_GAP = 7; // extra world-units per floor level when exploded
+  const ease = new BABYLON.CubicEase();
+  ease.setEasingMode(BABYLON.EasingFunction.EASINGMODE_EASEINOUT);
+
+  floorNodeData.forEach(({ node, baseY }, i) => {
+    const targetY = exploded ? baseY + i * EXTRA_GAP : baseY;
+
+    const anim = new BABYLON.Animation(
+      'explode_' + i, 'position.y', 60,
+      BABYLON.Animation.ANIMATIONTYPE_FLOAT,
+      BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT
+    );
+    anim.setKeys([
+      { frame:  0, value: node.position.y },
+      { frame: 24, value: targetY },
+    ]);
+    anim.setEasingFunction(ease);
+    node.animations = [anim];
+    scene.beginAnimation(node, 0, 24, false);
+  });
+}
+
+// ---------- Build entire building -----------------------------------------
 export function buildBuilding(floors, shadowGen) {
   if (!scene) return;
 
@@ -127,41 +197,63 @@ export function buildBuilding(floors, shadowGen) {
     buildingRoot.dispose();
     buildingRoot = null;
   }
+  // dispose(false, forceDisposeTextures=true) to also free GPU texture memory
+  ['wallMat', 'slabMat'].forEach(n => scene.getMaterialByName(n)?.dispose(false, true));
 
-  // Dispose stale materials from previous build
-  ['wallMat','floorMat','slabMat'].forEach(n => {
-    scene.getMaterialByName(n)?.dispose();
-  });
+  floorNodeData      = [];
+  floorMeshMap.clear();
+  _highlightedMeshes = [];
+  _isExploded        = false;
 
   const floorsWithWalls = floors.filter(f => f.walls.length > 0);
   if (!floorsWithWalls.length) return;
 
   buildingRoot = new BABYLON.TransformNode('building', scene);
 
-  // ── Wall material — warm plaster ──
-  const wallMat = new BABYLON.StandardMaterial('wallMat', scene);
-  wallMat.diffuseColor  = new BABYLON.Color3(0.92, 0.88, 0.82);
-  wallMat.specularColor = new BABYLON.Color3(0.06, 0.05, 0.04);
-  wallMat.ambientColor  = new BABYLON.Color3(0.20, 0.18, 0.15);
+  // PBR wall material - warm plaster
+  const wallMat          = new BABYLON.PBRMaterial('wallMat', scene);
+  wallMat.albedoColor    = new BABYLON.Color3(0.93, 0.89, 0.83);
+  wallMat.metallic       = 0.0;
+  wallMat.roughness      = 0.88;
+  wallMat.directIntensity      = 1.0;
+  wallMat.environmentIntensity = 0.06;
 
-  // ── Floor slab material — polished concrete ──
-  const slabMat = new BABYLON.StandardMaterial('slabMat', scene);
-  slabMat.diffuseColor  = new BABYLON.Color3(0.38, 0.36, 0.34);
-  slabMat.specularColor = new BABYLON.Color3(0.12, 0.10, 0.08);
-  slabMat.ambientColor  = new BABYLON.Color3(0.15, 0.14, 0.12);
+  // PBR slab material - oak wood floor
+  const slabMat          = new BABYLON.PBRMaterial('slabMat', scene);
+  slabMat.metallic       = 0.0;
+  slabMat.roughness      = 0.78;
+  slabMat.directIntensity      = 1.0;
+  slabMat.environmentIntensity = 0.08;
 
-  // Normalise scale to largest floor image
+  // Load PBR texture maps (from public/textures/2K/)
+  const _tex = (file, isLinear) => {
+    const t = new BABYLON.Texture('/textures/2K/' + file, scene);
+    t.uScale = 4; t.vScale = 4; // tile over the slab
+    if (isLinear) t.gammaSpace = false;
+    return t;
+  };
+  slabMat.albedoTexture  = _tex('Poliigon_WoodVeneerOak_7760_BaseColor.jpg', false);
+  slabMat.bumpTexture    = _tex('Poliigon_WoodVeneerOak_7760_Normal.png',     true);
+  slabMat.ambientTexture = _tex('Poliigon_WoodVeneerOak_7760_AmbientOcclusion.jpg', true);
+  slabMat.ambientTextureStrength = 0.8;
+  // Roughness scalar is used since we don't pack an ORM texture
+  // (Roughness map drives microSurface via useRoughnessFromMetallicTextureGreen
+  //  only when metallicTexture is set; we keep it as a scalar for simplicity)
+
   const maxDim = Math.max(...floorsWithWalls.map(f => Math.max(f.image.width, f.image.height)));
   const scale  = 80 / maxDim;
 
-  const storyGap = 0.25;
+  const storyGap = 0.20;
   let cumulativeY = 0;
 
   let totalMinX = Infinity, totalMaxX = -Infinity;
   let totalMinZ = Infinity, totalMaxZ = -Infinity;
   let totalHeight = 0;
 
-  floorsWithWalls.forEach((floor, floorIdx) => {
+  // Reverse so the first item in the sidebar is the HIGHEST floor
+  const ordered = [...floorsWithWalls].reverse();
+
+  ordered.forEach((floor, fi) => {
     const imgW = floor.image.width;
     const imgH = floor.image.height;
     const wH   = floor.wallHeight    ?? 3;
@@ -180,21 +272,29 @@ export function buildBuilding(floors, shadowGen) {
     totalMinX = Math.min(totalMinX, minX); totalMaxX = Math.max(totalMaxX, maxX);
     totalMinZ = Math.min(totalMinZ, minZ); totalMaxZ = Math.max(totalMaxZ, maxZ);
 
-    const baseY = cumulativeY;
-    const pad   = Math.max(wT, 0.4);
+    const baseY     = cumulativeY;
+    const pad       = Math.max(wT, 0.4);
+    const slabThick = 0.14;
 
-    // Floor slab (thin — like a structural slab, not a thick box)
-    const slabThick = 0.12;
-    const slab = BABYLON.MeshBuilder.CreateBox(`slab_${floorIdx}`, {
+    // Per-floor root node - used by explode animation
+    const floorNode = new BABYLON.TransformNode('fn_' + floor.id, scene);
+    floorNode.position.y = baseY;
+    floorNode.parent     = buildingRoot;
+
+    const meshes = [];
+
+    // Floor slab
+    const slab = BABYLON.MeshBuilder.CreateBox('slab_' + floor.id, {
       width:  Math.max(1, (maxX - minX) + pad * 2),
       height: slabThick,
       depth:  Math.max(1, (maxZ - minZ) + pad * 2),
     }, scene);
-    slab.position.set((minX + maxX) / 2, baseY - slabThick / 2, -(minZ + maxZ) / 2);
-    slab.material     = slabMat;
+    slab.position.set((minX + maxX) / 2, -slabThick / 2, -(minZ + maxZ) / 2);
+    slab.material       = slabMat;
     slab.receiveShadows = true;
-    slab.parent       = buildingRoot;
+    slab.parent         = floorNode;
     if (shadowGen) shadowGen.addShadowCaster(slab);
+    meshes.push(slab);
 
     // Walls
     for (let idx = 0; idx < floor.walls.length; idx++) {
@@ -205,24 +305,27 @@ export function buildBuilding(floors, shadowGen) {
       const len = Math.hypot(dx, dz);
       if (len < 0.05) continue;
 
-      const box = BABYLON.MeshBuilder.CreateBox(`w_${floorIdx}_${idx}`, {
+      const box = BABYLON.MeshBuilder.CreateBox('w_' + floor.id + '_' + idx, {
         width: len, height: wH, depth: wT,
       }, scene);
-      box.position.set((x1 + x2) / 2, baseY + wH / 2, -((z1 + z2) / 2));
-      box.rotation.y      = Math.atan2(dz, dx);
-      box.material        = wallMat;
-      box.receiveShadows  = true;
-      box.parent          = buildingRoot;
+      box.position.set((x1 + x2) / 2, wH / 2, -((z1 + z2) / 2));
+      box.rotation.y     = Math.atan2(dz, dx);
+      box.material       = wallMat;
+      box.receiveShadows = true;
+      box.parent         = floorNode;
       if (shadowGen) shadowGen.addShadowCaster(box);
+      meshes.push(box);
     }
+
+    floorMeshMap.set(floor.id, meshes);
+    floorNodeData.push({ floorId: floor.id, node: floorNode, baseY, slotHeight: wH + storyGap });
 
     cumulativeY += wH + storyGap;
     totalHeight  = cumulativeY;
   });
 
-  // ── Re-position camera to frame building ──
-  const cx = (totalMinX + totalMaxX) / 2;
-  const cz = -(totalMinZ + totalMaxZ) / 2;
+  const cx   = (totalMinX + totalMaxX) / 2;
+  const cz   = -(totalMinZ + totalMaxZ) / 2;
   const span = Math.max(totalMaxX - totalMinX, totalMaxZ - totalMinZ, totalHeight);
 
   camera.target = new BABYLON.Vector3(cx, totalHeight / 2, cz);
@@ -231,7 +334,7 @@ export function buildBuilding(floors, shadowGen) {
   camera.beta   = Math.PI / 3.2;
 }
 
-// ── Reset camera ─────────────────────────────────────────────────────────────
+// ---------- Reset camera --------------------------------------------------
 export function resetCamera() {
   if (!camera) return;
   camera.alpha  = -Math.PI / 2;
@@ -240,12 +343,13 @@ export function resetCamera() {
   camera.target = BABYLON.Vector3.Zero();
 }
 
-// ── Legacy compat shim ───────────────────────────────────────────────────────
+// ---------- Legacy compat shim --------------------------------------------
 export function buildWalls(walls, imgWidth, imgHeight, options = {}) {
   if (!walls.length) return;
   buildBuilding([{
+    id:            -1,
     walls,
-    points: [],
+    points:        [],
     image:         { width: imgWidth, height: imgHeight },
     wallHeight:    options.wallHeight    ?? 3,
     wallThickness: options.wallThickness ?? 0.2,
